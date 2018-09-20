@@ -12,11 +12,13 @@
     self.uri = [command.arguments objectAtIndex:0];
     self.userName = [command.arguments objectAtIndex:1];
     self.password = [command.arguments objectAtIndex:2];
+    self.host = [NSURL URLWithString:self.uri].host;
+
     self.allowBypassAuth = [[command.arguments objectAtIndex:3] boolValue];
     
     self.callbackId = command.callbackId;
     
-    NSLog(@"AuthDialog: authenticate %@", self.uri);
+    NSLog(@"AuthDialog: authenticate %@ '%@'", self.uri , self.host);
     
     [self credentialStorage:NO];
     
@@ -34,6 +36,41 @@
     [NSURLConnection  connectionWithRequest:request delegate:self];
 }
 
+
+
+
+-(NSURLCredential* )fromCredentialStorage
+{
+    NSLog(@"AuthDialog: fromCredentialStorage for %@", self.host);
+    
+    if (self.storedCredential == nil)
+    {
+       
+    
+        NSDictionary* credentialsDict = [[NSURLCredentialStorage sharedCredentialStorage] allCredentials];
+        
+        for (NSURLProtectionSpace* protectionSpace in credentialsDict){
+            NSLog(@"Protection space: %@", protectionSpace );
+            if ([protectionSpace.host isEqualToString:self.host]) {
+                NSDictionary* userNameDict = credentialsDict[protectionSpace];
+                for (NSString* userName in userNameDict){
+                    NSLog(@"AuthDialog.fromCredentialStorage: credential: %@", userName);
+                    NSLog(@"AuthDialog.fromCredentialStorage: credential: found: %@", userName);
+                    self.storedCredential = userNameDict[userName];
+                    return self.storedCredential;
+                  //  return credential;
+                }
+            } else {
+                NSLog(@"incorrect '%@' and '%@'", self.host, protectionSpace.host);
+            }
+        }
+    }
+        return self.storedCredential;
+  
+    // [[NSURLCache sharedURLCache] removeAllCachedResponses];
+}
+
+
 -(void)credentialStorage:(bool)remove
 {
     NSLog(@"AuthDialog: credentialStorage");
@@ -41,6 +78,8 @@
     NSDictionary* credentialsDict = [[NSURLCredentialStorage sharedCredentialStorage] allCredentials];
     
     for (NSURLProtectionSpace* protectionSpace in credentialsDict){
+        NSLog(@"Protection space: %@", protectionSpace );
+        
         NSDictionary* userNameDict = credentialsDict[protectionSpace];
         for (NSString* userName in userNameDict){
             NSLog(@"AuthDialog: credential: %@", userName);
@@ -55,19 +94,38 @@
     
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
 }
-
+-(void) clear {
+    NSLog(@"AuthDialog: credentialStorage");
+    
+    NSDictionary* credentialsDict = [[NSURLCredentialStorage sharedCredentialStorage] allCredentials];
+    
+    for (NSURLProtectionSpace* protectionSpace in credentialsDict){
+        NSLog(@"Protection space: %@", protectionSpace );
+          if ([protectionSpace.host isEqualToString:self.host]) {
+            NSDictionary* userNameDict = credentialsDict[protectionSpace];
+            for (NSString* userName in userNameDict){
+                NSLog(@"AuthDialog: credential: %@", userName);
+                NSLog(@"AuthDialog: credential: remove: %@", userName);
+                NSURLCredential* credential = userNameDict[userName];
+                [[NSURLCredentialStorage sharedCredentialStorage] removeCredential:credential forProtectionSpace:protectionSpace];
+            }
+          }
+    }
+    self.storedCredential = nil;
+}
 -(void)clearCredentials:(CDVInvokedUrlCommand*) command
 {
     NSLog(@"AuthDialog: clearCredentials");
     
-    [self credentialStorage:YES];
-    
+    [self clear];
     [self.commandDelegate sendPluginResult:[CDVPluginResult resultWithStatus:CDVCommandStatus_OK] callbackId:command.callbackId];
 }
 
 - (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error {
     CDVPluginResult* errorResult;
     if (error.code == NSURLErrorUserCancelledAuthentication) {
+        
+          [self clear];
         errorResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString: @"cancelled"];
     } else {
         errorResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error localizedDescription]];
@@ -86,6 +144,7 @@
     if (statusCode == 200 || statusCode == 405) {
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
     } else {
+          [self clear];
         pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:
                         [NSHTTPURLResponse localizedStringForStatusCode: statusCode]];
     }
@@ -95,6 +154,7 @@
 
 - (BOOL) isSupportedAuthMethod:(NSString*)authenticationMethod {
     // TODO extend to others
+    NSLog(@"Authmethod: %@", authenticationMethod);
     return [authenticationMethod isEqualToString:NSURLAuthenticationMethodNTLM] ||
     [authenticationMethod isEqualToString:NSURLAuthenticationMethodHTTPBasic] ||
     [authenticationMethod isEqualToString:NSURLAuthenticationMethodHTTPDigest];
@@ -105,6 +165,7 @@ CredentialsViewController * credentialsViewController;
 
 - (void)connection:(NSURLConnection *)connection willSendRequestForAuthenticationChallenge:(NSURLAuthenticationChallenge *)challenge
 {
+  
     NSLog(@"AuthDialog: willSendRequestForAuthenticationChallenge %@", challenge.protectionSpace);
     
     // if no credentials are passed during first authentication attempt then
@@ -117,7 +178,11 @@ CredentialsViewController * credentialsViewController;
     
     if ([challenge previousFailureCount] == 0 && [self isSupportedAuthMethod: challenge.protectionSpace.authenticationMethod])
     {
-        
+        NSURLCredential *credential = [self fromCredentialStorage];
+        if (credential != nil) {
+            self.userName = credential.user;
+            self.password = credential.password;
+        }
         // use predefined credentials if provided
         if (![self.userName isEqual:[NSNull null]] && ![self.password isEqual:[NSNull null]]) {
             
@@ -133,8 +198,13 @@ CredentialsViewController * credentialsViewController;
                 credentialsViewController = NULL;
                 
                 if (isCancelled) {
+                      [self clear];
                     [[challenge sender] cancelAuthenticationChallenge:challenge];
                 } else {
+                    NSURLCredential *credential = [NSURLCredential credentialWithUser:userName password:password persistence:NSURLCredentialPersistencePermanent];
+                    
+                    [[NSURLCredentialStorage sharedCredentialStorage] setCredential:credential forProtectionSpace:challenge.protectionSpace];
+                    NSLog(@"User connected:%@ with password", credential.user);
                     [[challenge sender] useCredential:[NSURLCredential credentialWithUser:userName
                                                                                  password:password
                                                                               persistence:NSURLCredentialPersistenceForSession]
