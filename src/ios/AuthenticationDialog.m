@@ -55,7 +55,6 @@
                 NSDictionary* userNameDict = credentialsDict[protectionSpace];
                 for (NSString* userName in userNameDict){
                     NSLog(@"AuthDialog.fromCredentialStorage: credential: %@", userName);
-                    NSLog(@"AuthDialog.fromCredentialStorage: credential: found: %@", userName);
                     self.storedCredential = userNameDict[userName];
                     return self.storedCredential;
                   //  return credential;
@@ -94,9 +93,7 @@
     
     [[NSURLCache sharedURLCache] removeAllCachedResponses];
 }
--(void) clear {
-    NSLog(@"AuthDialog: credentialStorage");
-    
+-(void) clear {    
     NSDictionary* credentialsDict = [[NSURLCredentialStorage sharedCredentialStorage] allCredentials];
     
     for (NSURLProtectionSpace* protectionSpace in credentialsDict){
@@ -104,7 +101,6 @@
           if ([protectionSpace.host isEqualToString:self.host]) {
             NSDictionary* userNameDict = credentialsDict[protectionSpace];
             for (NSString* userName in userNameDict){
-                NSLog(@"AuthDialog: credential: %@", userName);
                 NSLog(@"AuthDialog: credential: remove: %@", userName);
                 NSURLCredential* credential = userNameDict[userName];
                 [[NSURLCredentialStorage sharedCredentialStorage] removeCredential:credential forProtectionSpace:protectionSpace];
